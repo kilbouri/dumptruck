@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::io::{stdout, Write};
-use std::time::Instant;
+use std::thread::{self, available_parallelism, JoinHandle};
 
 use colored::Colorize;
 use fake::faker::boolean::en::Boolean;
@@ -10,7 +9,7 @@ use fake::faker::name::raw::*;
 use fake::faker::phone_number::raw::*;
 use fake::{locales::*, Fake};
 use rand::random;
-use reqwest::Client;
+use reqwest::blocking::Client;
 
 #[derive(Debug)]
 struct FakeData {
@@ -98,8 +97,28 @@ impl FakeData {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // take num_threads = 1, or available parallelism - 1, whichever is higher
+    let num_threads = (available_parallelism()?.get() - 1).max(1);
+    println!(
+        "{} {} {}",
+        "Using".black(),
+        num_threads.to_string().blue(),
+        "threads".black()
+    );
+
+    let threads: Vec<JoinHandle<()>> = (0..num_threads)
+        .map(|thread_id| thread::spawn(move || thread_task(thread_id)))
+        .collect();
+
+    for thread in threads {
+        thread.join().unwrap();
+    }
+
+    Ok(())
+}
+
+fn thread_task(thread_id: usize) {
     // Put your own URL in src/url.in
     // This is an easy way to prevent distributing links that lead to malicious forms
     const TARGET_URL: &str = include_str!("url.in");
@@ -112,9 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     const OTHER_EMAIL_FIELD: &str = "entry.905225749";
     const OTHER_PASSCODE_FIELD: &str = "entry.1107614691";
 
-    let mut counter: u128 = 0;
     loop {
-        let interval_start = Instant::now();
         let random_data = FakeData::generate();
         let mut form = HashMap::new();
 
@@ -126,34 +143,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         form.insert(OTHER_EMAIL_FIELD, random_data.other_email());
         form.insert(OTHER_PASSCODE_FIELD, random_data.other_password());
 
-        print!("{counter}: {random_data}...");
-        let _ = stdout().flush();
+        let post_result = Client::new().post(TARGET_URL).form(&form).send();
+        if let Err(error) = post_result {
+            print!("{error}");
+            break;
+        }
 
-        let status = Client::new()
-            .post(TARGET_URL)
-            .form(&form)
-            .send()
-            .await?
-            .status();
+        let status = post_result.unwrap().status();
+        let status_str = if status.is_success() {
+            status.to_string().green()
+        } else {
+            status.to_string().yellow()
+        };
 
-        print!(
-            " {}",
-            if status.is_success() {
-                status.to_string().green()
-            } else {
-                status.to_string().yellow()
-            }
-        );
-
-        let interval_end = Instant::now();
-        let requests_per_minute = 60000 / interval_end.duration_since(interval_start).as_millis();
-        println!(
-            "{}{}{}",
-            " (".black(),
-            requests_per_minute.to_string().blue(),
-            " req/min)".black()
-        );
-
-        counter += 1;
+        println!("[{thread_id}] {random_data} -> {status_str}");
     }
 }
