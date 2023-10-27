@@ -1,5 +1,9 @@
 use std::collections::HashMap;
+use std::fmt::Display;
+use std::io::{stdout, Write};
+use std::time::Instant;
 
+use colored::Colorize;
 use fake::faker::boolean::en::Boolean;
 use fake::faker::internet::raw::*;
 use fake::faker::name::raw::*;
@@ -17,6 +21,29 @@ struct FakeData {
     phone_number: String,
     alt_email: Option<String>,
     alt_passcode: Option<String>,
+}
+
+impl Display for FakeData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s: String = [
+            "('".black().to_string(),
+            self.full_name().purple().to_string(),
+            "': [".black().to_string(),
+            self.email.purple().to_string(),
+            ", ".black().to_string(),
+            self.passcode.purple().to_string(),
+            "], [".black().to_string(),
+            self.other_email().purple().to_string(),
+            ", ".black().to_string(),
+            self.other_password().purple().to_string(),
+            "], ".black().to_string(),
+            self.phone_number.purple().to_string(),
+            ")".black().to_string(),
+        ]
+        .join("");
+
+        f.write_str(&s)
+    }
 }
 
 impl FakeData {
@@ -85,7 +112,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     const OTHER_EMAIL_FIELD: &str = "entry.905225749";
     const OTHER_PASSCODE_FIELD: &str = "entry.1107614691";
 
+    let mut counter: u128 = 0;
     loop {
+        let interval_start = Instant::now();
         let random_data = FakeData::generate();
         let mut form = HashMap::new();
 
@@ -97,19 +126,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         form.insert(OTHER_EMAIL_FIELD, random_data.other_email());
         form.insert(OTHER_PASSCODE_FIELD, random_data.other_password());
 
-        println!("Sending {:?}", random_data);
+        print!("{counter}: {random_data}...");
+        let _ = stdout().flush();
 
-        let response = Client::new()
+        let status = Client::new()
             .post(TARGET_URL)
             .form(&form)
             .send()
             .await?
             .status();
 
-        println!("Received status {response}");
+        print!(
+            " {}",
+            if status.is_success() {
+                status.to_string().green()
+            } else {
+                status.to_string().yellow()
+            }
+        );
 
-        if !response.is_success() {
-            println!("Aborting");
-        }
+        let interval_end = Instant::now();
+        let requests_per_minute = 60000 / interval_end.duration_since(interval_start).as_millis();
+        println!(
+            "{}{}{}",
+            " (".black(),
+            requests_per_minute.to_string().blue(),
+            " req/min)".black()
+        );
+
+        counter += 1;
     }
 }
