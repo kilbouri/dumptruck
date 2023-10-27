@@ -99,7 +99,8 @@ impl FakeData {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // take num_threads = 1, or available parallelism - 1, whichever is higher
-    let num_threads = (available_parallelism()?.get() - 1).max(1);
+    let max_threads = 2;
+    let num_threads = (available_parallelism()?.get() - 1).max(1).min(max_threads);
     println!(
         "{} {} {}",
         "Using".black(),
@@ -149,13 +150,15 @@ fn thread_task(thread_id: usize) {
             break;
         }
 
-        let status = post_result.unwrap().status();
+        let response = post_result.unwrap();
+        let status = response.status();
         let status_str = if status.is_success() {
             status.to_string().green()
         } else {
             status.to_string().yellow()
         };
 
+        println!("[{thread_id}] {:?}", response.headers());
         println!("[{thread_id}] {random_data} -> {status_str}");
     }
 }
